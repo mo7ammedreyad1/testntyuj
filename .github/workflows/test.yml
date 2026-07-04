@@ -1,0 +1,24 @@
+name: Ofoq Rust Benchmark Test
+
+on:
+  workflow_dispatch: # يتيح لك تشغيل الاختبار يدوياً بزر واحد من موقع جيتهاب
+
+jobs:
+  run-benchmark:
+    runs-on: ubuntu-latest # البيئة الافتراضية بنواتين
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust Dependencies
+        uses: swatinem/rust-cache@v2 # لتسريع البناء في الممرات القادمة
+
+      - name: Build Optimized Binary
+        run: cargo build --release
+
+      - name: Execute Stealth Performance Benchmark
+        run: ./target/release/your_project_name # استبدل your_project_name باسم مشروعك في الـ Cargo.toml
