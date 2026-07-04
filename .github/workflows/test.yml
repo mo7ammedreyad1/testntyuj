@@ -21,4 +21,4 @@ jobs:
         run: cargo build --release
 
       - name: Execute Stealth Performance Benchmark
-        run: ./target/release/your_project_name # استبدل your_project_name باسم مشروعك في الـ Cargo.toml
+        run: ./target/release/testntyuj
