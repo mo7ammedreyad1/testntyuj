@@ -1,11 +1,11 @@
 name: Ofoq Rust Benchmark Test
 
 on:
-  workflow_dispatch: # يتيح لك تشغيل الاختبار يدوياً بزر واحد من موقع جيتهاب
+  workflow_dispatch:
 
 jobs:
   run-benchmark:
-    runs-on: ubuntu-latest # البيئة الافتراضية بنواتين
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
@@ -15,10 +15,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust Dependencies
-        uses: swatinem/rust-cache@v2 # لتسريع البناء في الممرات القادمة
+        uses: swatinem/rust-cache@v2
 
       - name: Build Optimized Binary
         run: cargo build --release
 
-      - name: Execute Stealth Performance Benchmark
+      - name: Execute 1-Hour Pool Connection Test
+        # نضع حد أقصى للوقت المسموح للأكشن للعمل (مثلا 65 دقيقة لضمان انتهاء الساعة كاملة)
+        timeout-minutes: 70 
         run: ./target/release/testntyuj
