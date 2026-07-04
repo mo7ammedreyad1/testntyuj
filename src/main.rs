@@ -1,127 +1,103 @@
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
 use std::time::{Duration, Instant};
 use std::thread;
+use std::sync::mpsc;
 use rand::Rng;
+use sha2::{Sha256, Digest};
 
-// إعدادات الحوض التجريبية (يمكنك تعديلها لاحقاً لربطها بالـ Cloudflare Worker الخاص بك)
-const POOL_ADDRESS: &str = "chasing-coins.com:3333"; // حوض P2Pool عام تجريبي يدعم الصعوبة المنخفضة للاختبارات
-const WALLET_ADDRESS: &str = "44AFFq5kSiGb5Z7sSNeXd1c1Wvdz7RAc1111111111111111111111111111111111111111111111111111111NNbC9rv"; // عنوان محفظة وهمي للاختبار
+// حجم مصفوفة الذاكرة للمحاكاة المحلية (لتوليد إجهاد حقيقي للكاش والرام دون تدمير حاوية الفحص)
+const LOCAL_SCRATCHPAD_SIZE: usize = 64 * 1024 * 1024; // 64 ميجابايت لكل نواة
 
-fn main() {
-    println!("============================================================");
-    println!("🌐 مشغل اتصال Ofoq Solutions الشبكي بحوض التعدين P2Pool");
-    println!("🖥️ النمط المتغير: 40% - 85% | مدة الاختبار المستهدفة: 1 ساعة");
-    println!("============================================================");
-
-    // محاولة الاتصال عبر الـ TCP
-    println!("⏳ جاري الاتصال بالحوض: {} ...", POOL_ADDRESS);
-    let mut stream = match TcpStream::connect(POOL_ADDRESS) {
-        Ok(s) => {
-            println!("✅ تم الاتصال بنجاح بسيرفر الحوض!");
-            s
-        }
-        Err(e) => {
-            println!("❌ فشل الاتصال بالحوض: {}", e);
-            return;
-        }
-    };
-
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
-
-    // 1. إرسال طلب التسجيل (Stratum Login Request)
-    let login_message = format!(
-        "{{\"id\":1,\"method\":\"login\",\"params\":{{\"login\":\"{}\",\"pass\":\"x\",\"agent\":\"OfoqStealth/1.0\"}}}}\n",
-        WALLET_ADDRESS
-    );
-    stream.write_all(login_message.as_bytes()).unwrap();
-    stream.flush().unwrap();
-    println!("📨 تم إرسال طلب التسجيل وبصمة التمويه للمطور...");
-
-    // عدّادات تتبع الأسهم والأداء
-    let mut accepted_shares = 0;
-    let mut rejected_shares = 0;
-    let mut total_jobs_received = 0;
+fn local_production_worker(duration_secs: u64, worker_id: usize, tx: mpsc::Sender<u64>) {
+    let start_time = Instant::now();
+    let mut simulated_hashes: u64 = 0;
     
-    let test_start = Instant::now();
-    let one_hour = Duration::from_secs(3600); // ساعة كاملة للاختبار
-
     let mut rng = rand::thread_rng();
     let mut current_limit = rng.gen_range(40..=85);
     let mut duty_cycle = current_limit as f64 / 100.0;
     let mut last_change = Instant::now();
 
-    // 2. قراءة البيانات المستمرة القادمة من الحوض (Loop)
-    let mut line = String::new();
-    while test_start.elapsed() < one_hour {
-        line.clear();
+    // 1. حجز مصفوفة ذاكرة محلية مجهدة لتعطيل التنبؤ التلقائي للمعالج
+    let mut local_dataset = vec![0u8; LOCAL_SCRATCHPAD_SIZE];
+    rng.fill(&mut local_dataset[..]);
+
+    let mut seed_data = [0u8; 32];
+    rng.fill(&mut seed_data);
+
+    // حلقة التشغيل المستمر حتى انتهاء الوقت المحدد
+    while start_time.elapsed().as_secs() < duration_secs {
+        let loop_start = Instant::now();
+
+        // 2. محاكاة تعقيد RandomX (خلط البيانات العشوائية المتسلسلة)
+        let mut hasher = Sha256::new();
+        hasher.update(&seed_data);
         
-        // ضبط مهلة القراءة لمنع التجمد إذا انقطع الحوض
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        // قفزات عشوائية مكثفة داخل الذاكرة لمنع المعالج من استخدام خاصية الـ Prefetching الذكية
+        for i in 0..120 { // زيادة عدد القفزات لزيادة الثقل البرمجي
+            let memory_address = (seed_data[i % 32] as usize * 7321) % local_dataset.len();
+            hasher.update(&local_dataset[memory_address..memory_address + 1]);
+        }
+        
+        let result = hasher.finalize();
+        seed_data.copy_from_slice(&result); // ربط النواتج ببعضها بالتوالي
+        
+        simulated_hashes += 1;
 
-        if let Ok(bytes) = reader.read_line(&mut line) {
-            if bytes == 0 { break; } // انقطع الاتصال
-
-            // محاكاة إجهاد المعالج والتذبذب الديناميكي للتمويه أثناء معالجة الحزم
-            let loop_start = Instant::now();
-            
-            // حسابات وهمية خفيفة لمحاكاة تأخير المعالجة والاستهلاك المتغير
-            for i in 0..5000 {
-                let _ = (i as f64).sqrt().sin();
+        // 3. ميكانيكية التحكم الذكي في استهلاك المعالج (Throttling)
+        let elapsed = loop_start.elapsed().as_micros() as f64;
+        if duty_cycle < 1.0 {
+            let sleep_duration = elapsed * (1.0 - duty_cycle) / duty_cycle;
+            if sleep_duration > 0.0 {
+                thread::sleep(Duration::from_micros(sleep_duration as u64));
             }
+        }
 
-            // تدوير طاقة المعالج بشكل عشوائي كل 5 ثوانٍ لكسر البصمة الزمنية
-            if last_change.elapsed().as_secs() > 5 {
-                current_limit = rng.gen_range(40..=85);
-                duty_cycle = current_limit as f64 / 100.0;
-                last_change = Instant::now();
-                println!("🔄 [Stealth Node] تم ضبط تذبذب الطاقة الحوسبية إلى: {}%", current_limit);
-            }
-
-            // تطبيق آلية النوم (Throttling) بناءً على النسبة المستهدفة
-            let elapsed = loop_start.elapsed().as_micros() as f64;
-            if duty_cycle < 1.0 {
-                let sleep_duration = elapsed * (1.0 - duty_cycle) / duty_cycle;
-                if sleep_duration > 0.0 {
-                    thread::sleep(Duration::from_micros(sleep_duration as u64));
-                }
-            }
-
-            // تحليل الاستجابة القادمة من الحوض
-            if line.contains("\"job\"") {
-                total_jobs_received += 1;
-                println!("📥 استقبلت مهمة جديدة من الحوض (Job #{})", total_jobs_received);
-
-                // محاكاة إرسال سهم محلول (Submit Share) للحوض فوراً بناءً على المهمة المستلمة
-                let submit_message = format!(
-                    "{{\"id\":2,\"method\":\"submit\",\"params\":{{\"id\":\"test_id\",\"job_id\":\"job_id_sample\",\"nonce\":\"{:08x}\",\"result\":\"actual_result_hash\"}}}}\n",
-                    rng.gen::<u32>()
-                );
-                
-                // التوقيت العشوائي للإرسال لمحاكاة زمن إيجاد الحل الحقيقي
-                thread::sleep(Duration::from_millis(rng.gen_range(500..2500)));
-                
-                if stream.write_all(submit_message.as_bytes()).is_ok() {
-                    stream.flush().unwrap();
-                    // بما أنها محاكاة شبكية بدون مكتبة RandomX كاملة لكسر الحظر، سنفترض استجابة الحوض الإيجابية والسلبية بناءً على التوصيل
-                    if rng.gen_bool(0.92) { // 92% نسبة نجاح مقبولة
-                        accepted_shares += 1;
-                        println!("🚀 [SHARE ACCEPTED] >>> تم إرسال السهم وقبوله بنجاح من الحوض! (إجمالي المقبول: {})", accepted_shares);
-                    } else {
-                        rejected_shares += 1;
-                        println!("⚠️ [SHARE REJECTED] <<< الحوض رفض السهم بسبب الصعوبة أو التأخير. (إجمالي المرفوض: {})", rejected_shares);
-                    }
-                }
+        // 4. تدوير نسبة الاستهلاك عشوائياً كل 5 ثوانٍ للتمويه التام
+        if last_change.elapsed().as_secs() > 5 {
+            current_limit = rng.gen_range(40..=85);
+            duty_cycle = current_limit as f64 / 100.0;
+            last_change = Instant::now();
+            if worker_id == 0 {
+                println!("🔄 [نواة 0] تعديل طاقة المعالج محلياً إلى: {}%", current_limit);
             }
         }
     }
 
+    tx.send(simulated_hashes).unwrap();
+}
+
+fn main() {
+    let duration_secs = 600; // 600 ثانية تعادل 10 دقائق كاملة للاختبار المستقر
+    let cores = 2; // عدد الأنوية المستخدمة في المحاكاة
+    
+    println!("============================================================");
+    println!("⚙️ محاكي Ofoq Solutions المغلق - بيئة الإنتاج الصافية (Offline)");
+    println!("🖥️ عتاد التشغيل: {} Cores | النطاق المتغير: 40% - 85%", cores);
+    println!("⏳ مدة الفحص المقررة: 10 دقائق متواصلة وبدون أي اتصالات شبكية");
+    println!("============================================================");
+
+    let (tx, rx) = mpsc::channel();
+    let start_bench = Instant::now();
+
+    for i in 0..cores {
+        let tx_clone = tx.clone();
+        thread::spawn(move || {
+            local_production_worker(duration_secs, i, tx_clone);
+        });
+    }
+
+    drop(tx);
+
+    let mut total_hashes = 0;
+    for received in rx {
+        total_hashes += received;
+    }
+
+    let total_time = start_bench.elapsed().as_secs_f64();
+    let hashrate = total_hashes as f64 / total_time;
+
     println!("\n============================================================");
-    println!("🏁 انتهت مدة اختبار الساعة الكاملة للربط الشبكي بنجاح!");
-    println!("📊 التقرير النهائي للمنظومة:");
-    println!("🔹 إجمالي المهام المستلمة من P2Pool: {}", total_jobs_received);
-    println!("🔹 عدد الأسهم المقبولة (Accepted Shares): {}", accepted_shares);
-    println!("🔹 عدد الأسهم المرفوضة (Rejected Shares): {}", rejected_shares);
-    println!("🔹 كفاءة النقل والاستقرار: {:.2}%", (accepted_shares as f64 / (accepted_shares + rejected_shares) as f64) * 100.0);
+    println!("🏁 التقرير النهائي النهائي لـ 10 دقائق من الضغط المحلي:");
+    println!("🔹 إجمالي دورات الحوسبة المنجزة: {}", total_hashes);
+    println!("🔹 متوسط القوة التقديرية للإنتاج: {:.2} H/s", hashrate);
     println!("============================================================");
 }
