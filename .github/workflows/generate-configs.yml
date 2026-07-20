@@ -1,0 +1,47 @@
+name: Generate Educational Core Configs
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # يعمل تلقائياً كل 6 ساعات
+  workflow_dispatch: # يتيح لك تشغيله يدوياً في أي وقت
+
+jobs:
+  build-configs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Fresh CloudFront IP & Build Configs
+        run: |
+          # 1. جلب آي بي نشط وحديث لـ CloudFront
+          resolved_ip=$(dig +short assessment-api-wss.ekb.eg | tail -n1)
+          if [ -z "$resolved_ip" ]; then
+            resolved_ip="18.173.166.77" # آي بي احتياطي في حال فشل الـ DNS
+          fi
+          
+          echo "Using CloudFront Target IP: $resolved_ip"
+          
+          # 2. إعداد المتغيرات الأساسية للنفق (استبدل البيانات الوهمية ببيانات سيرفرك الخاص)
+          UUID="YOUR_VLESS_UUID_HERE"
+          SERVER_PORT="443"
+          BUG_HOST="assessment-api-wss.ekb.eg"
+          
+          # 3. توليد رابط VLESS WebSocket (يدعمه v2rayNG, Shadowrocket, Nekobox, Streisand)
+          # هذا التشكيل يضع الآي بي النشط كوجهة، والـ Bug Host كـ SNI و Host Header معاً لضمان التخطي
+          vless_config="vless://${UUID}@${resolved_ip}:${SERVER_PORT}?encryption=none&security=tls&sni=${BUG_HOST}&type=ws&host=${BUG_HOST}&path=%2F#Edu-Bypass-WS"
+          
+          # 4. حفظ التكوينات في ملفات لمشاركتها أو رفعها
+          echo "$vless_config" > configs.txt
+          
+          # طباعة الرابط في الـ Logs لتنسخه مباشرة
+          echo "--------------------------------------------------------"
+          echo "COPY YOUR CONFIG BELOW:"
+          echo "$vless_config"
+          echo "--------------------------------------------------------"
+
+      - name: Upload Config Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vpn-configs
+          path: configs.txt
